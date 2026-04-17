@@ -1,0 +1,7 @@
+../Drivers/CMSIS/Include/core_cm33.h:2711:34:void __NVIC_SystemReset()	4	static,ignoring_inline_asm
+../Core/Src/upd.cpp:28:13:bool UpdateFlushQuad()	24	static
+../Core/Src/upd.cpp:58:13:bool UpdateEraseArea()	56	static
+../Core/Src/upd.cpp:91:9:uint8_t SetUpdateWord(uint32_t, uint32_t)	48	static
+../Core/Src/upd.cpp:145:9:uint8_t GetUpdateWord(uint32_t, uint32_t*)	32	static
+../Core/Src/upd.cpp:166:9:uint8_t FinishUpdateTransmit()	8	static
+../Core/Src/upd.cpp:180:10:uint32_t GetAppVersion()	4	static
