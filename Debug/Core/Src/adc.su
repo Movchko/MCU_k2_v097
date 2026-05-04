@@ -1,6 +1,0 @@
-../Core/Src/adc.c:17:17:SmaProcess	24	static
-../Core/Src/adc.c:39:10:ADC_GetIgniter1Filtered	4	static
-../Core/Src/adc.c:40:10:ADC_GetIgniter2Filtered	4	static
-../Core/Src/adc.c:41:10:ADC_GetIgniter3Filtered	4	static
-../Core/Src/adc.c:42:10:ADC_GetU24Filtered	4	static
-../Core/Src/adc.c:44:6:HAL_ADC_ConvCpltCallback	32	static
