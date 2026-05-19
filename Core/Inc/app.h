@@ -9,10 +9,13 @@ extern "C" {
 
 void App_Init(void);
 void App_Timer1ms(void);
+void FDCAN_StartAll(void);
 void App_CanRxPush(uint32_t id, const uint8_t *data, uint8_t bus);
 void App_CanProcess(void);
+void App_CanTxProcess(void);
 void App_CanOnRx(uint8_t bus);      /* 1 = CAN1, 2 = CAN2 */
 void App_UpdateCanActivity(void);
+uint8_t App_GetCanStateMask(void);
 extern volatile uint8_t CAN1_Active;
 extern volatile uint8_t CAN2_Active;
 
