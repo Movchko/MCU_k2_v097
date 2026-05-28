@@ -444,6 +444,9 @@ void App_Timer1ms(void) {
         }
         status_data[6] = App_GetCanStateMask();
         SendMessage(0, 0, status_data, SEND_NOW, BUS_CAN12);
+
+        uint8_t pos_data[7] = {0u, 0u, 0u, 0u, 0u, 0u, 0u};
+        SendMessage(0, ServiceCmd_PositionDevice, pos_data, SEND_NOW, BUS_CAN12);
     }
 
     /* LED toggle (debug) */
@@ -500,7 +503,6 @@ void App_Timer1ms(void) {
     g_igniter3.Timer1ms();
 
     /* CAN processing */
-    App_CanProcess();
     BackendProcess();
 
     /* Применяем ШИМ на соответствующие каналы:

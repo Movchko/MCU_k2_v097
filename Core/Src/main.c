@@ -134,6 +134,7 @@ int main(void)
 	      last_tick = now;
 	      App_Timer1ms();
 	    }
+	App_CanProcess();
     App_CanTxProcess();
   }
   /* USER CODE END 3 */

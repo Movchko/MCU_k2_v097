@@ -7,6 +7,8 @@ extern "C" {
 #include "main.h"
 
 #define APP_CAN_RX_RING_SIZE  256
+#define CAN_WATCHDOG_PERIOD_MS 3000u
+#define CAN_TX_STALL_RECOVERY_MS 3000u
 typedef struct {
     uint32_t id;
     uint8_t  data[8];
@@ -43,6 +45,14 @@ static volatile uint8_t can1_tx_tail = 0;
 static CanTxEntry can2_tx_ring[CAN_TX_RING_SIZE];
 static volatile uint8_t can2_tx_head = 0;
 static volatile uint8_t can2_tx_tail = 0;
+static uint32_t can1_tx_stall_since_ms = 0;
+static uint32_t can2_tx_stall_since_ms = 0;
+static uint32_t can_watchdog_last_ms = 0;
+
+/* Диагностические счётчики для отладки проблем шины/очередей. */
+static uint32_t g_can_tx_drop_count[2] = {0u, 0u};
+static uint32_t g_can_busoff_recover_count[2] = {0u, 0u};
+static uint32_t g_can_tx_stall_recover_count[2] = {0u, 0u};
 
 extern FDCAN_HandleTypeDef hfdcan1;
 extern FDCAN_HandleTypeDef hfdcan2;
@@ -80,13 +90,16 @@ void FDCAN_StartAll(void)
 }
 
 static void CanTxEnqueueOne(CanTxEntry *ring, volatile uint8_t *head, volatile uint8_t *tail,
-                            uint32_t id, const uint8_t *data)
+                            uint32_t id, const uint8_t *data, uint8_t bus_idx)
 {
   uint8_t next = (uint8_t)(*head + 1u);
   if (next >= CAN_TX_RING_SIZE) {
     next = 0u;
   }
   if (next == *tail) {
+    if (bus_idx < 2u) {
+      g_can_tx_drop_count[bus_idx]++;
+    }
     (*tail)++;
     if (*tail >= CAN_TX_RING_SIZE) {
       *tail = 0u;
@@ -103,18 +116,21 @@ static void CanTxEnqueueOne(CanTxEntry *ring, volatile uint8_t *head, volatile u
 static void CanTxEnqueue(uint32_t id, const uint8_t *data, uint8_t busMask)
 {
   if ((busMask & BUS_CAN0) != 0u) {
-    CanTxEnqueueOne(can1_tx_ring, &can1_tx_head, &can1_tx_tail, id, data);
+    CanTxEnqueueOne(can1_tx_ring, &can1_tx_head, &can1_tx_tail, id, data, 0u);
   }
   if ((busMask & BUS_CAN1) != 0u) {
-    CanTxEnqueueOne(can2_tx_ring, &can2_tx_head, &can2_tx_tail, id, data);
+    CanTxEnqueueOne(can2_tx_ring, &can2_tx_head, &can2_tx_tail, id, data, 1u);
   }
 }
 
 static void App_CanTxProcessBus(FDCAN_HandleTypeDef *hfdcan,
                                 CanTxEntry *ring,
                                 volatile uint8_t *head,
-                                volatile uint8_t *tail)
+                                volatile uint8_t *tail,
+                                uint8_t bus_idx,
+                                uint32_t *stall_since_ms)
 {
+  uint32_t now = HAL_GetTick();
   while (*head != *tail) {
     CanTxEntry *e = &ring[*tail];
     FDCAN_TxHeaderTypeDef txHeader;
@@ -130,11 +146,20 @@ static void App_CanTxProcessBus(FDCAN_HandleTypeDef *hfdcan,
     txHeader.MessageMarker = 0;
 
     if (HAL_FDCAN_GetTxFifoFreeLevel(hfdcan) == 0U) {
+      if (*stall_since_ms == 0u) {
+        *stall_since_ms = now;
+      }
       break;
     }
     if (HAL_FDCAN_AddMessageToTxFifoQ(hfdcan, &txHeader, e->data) != HAL_OK) {
+      if (*stall_since_ms == 0u) {
+        *stall_since_ms = now;
+      }
       break;
     }
+
+    (void)bus_idx;
+    *stall_since_ms = 0u;
 
     (*tail)++;
     if (*tail >= CAN_TX_RING_SIZE) {
@@ -145,8 +170,8 @@ static void App_CanTxProcessBus(FDCAN_HandleTypeDef *hfdcan,
 
 void App_CanTxProcess(void)
 {
-  App_CanTxProcessBus(&hfdcan1, can1_tx_ring, &can1_tx_head, &can1_tx_tail);
-  App_CanTxProcessBus(&hfdcan2, can2_tx_ring, &can2_tx_head, &can2_tx_tail);
+  App_CanTxProcessBus(&hfdcan1, can1_tx_ring, &can1_tx_head, &can1_tx_tail, 0u, &can1_tx_stall_since_ms);
+  App_CanTxProcessBus(&hfdcan2, can2_tx_ring, &can2_tx_head, &can2_tx_tail, 1u, &can2_tx_stall_since_ms);
 }
 
 void CANSendData(uint8_t *Buf)
@@ -183,6 +208,51 @@ static void App_UpdateCanLineState(void)
   }
 }
 
+static void App_CanRecoverBus(FDCAN_HandleTypeDef *hfdcan, uint8_t bus_idx)
+{
+  uint16_t try_cnt = 0xFFFFu;
+  SET_BIT(hfdcan->Instance->CCCR, FDCAN_CCCR_INIT);
+  while (((hfdcan->Instance->CCCR & FDCAN_CCCR_INIT) == 0U) && (try_cnt--)) {}
+  try_cnt = 0xFFFFu;
+  CLEAR_BIT(hfdcan->Instance->CCCR, FDCAN_CCCR_INIT);
+  while (((hfdcan->Instance->CCCR & FDCAN_CCCR_INIT) != 0U) && (try_cnt--)) {}
+  if (bus_idx < 2u) {
+    g_can_busoff_recover_count[bus_idx]++;
+  }
+}
+
+static void App_CanWatchdog(void)
+{
+  uint32_t now = HAL_GetTick();
+  if ((now - can_watchdog_last_ms) < CAN_WATCHDOG_PERIOD_MS) {
+    return;
+  }
+  can_watchdog_last_ms = now;
+
+  FDCAN_ProtocolStatusTypeDef st = {};
+  if (HAL_FDCAN_GetProtocolStatus(&hfdcan1, &st) == HAL_OK && st.BusOff) {
+    App_CanRecoverBus(&hfdcan1, 0u);
+    can1_tx_stall_since_ms = 0u;
+  }
+  if (HAL_FDCAN_GetProtocolStatus(&hfdcan2, &st) == HAL_OK && st.BusOff) {
+    App_CanRecoverBus(&hfdcan2, 1u);
+    can2_tx_stall_since_ms = 0u;
+  }
+
+  if (can1_tx_head != can1_tx_tail && can1_tx_stall_since_ms != 0u &&
+      (now - can1_tx_stall_since_ms) >= CAN_TX_STALL_RECOVERY_MS) {
+    App_CanRecoverBus(&hfdcan1, 0u);
+    g_can_tx_stall_recover_count[0]++;
+    can1_tx_stall_since_ms = 0u;
+  }
+  if (can2_tx_head != can2_tx_tail && can2_tx_stall_since_ms != 0u &&
+      (now - can2_tx_stall_since_ms) >= CAN_TX_STALL_RECOVERY_MS) {
+    App_CanRecoverBus(&hfdcan2, 1u);
+    g_can_tx_stall_recover_count[1]++;
+    can2_tx_stall_since_ms = 0u;
+  }
+}
+
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
   if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) == 0U) {
@@ -213,10 +283,12 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     }
 
     if (GetRetranslate() == 0) {
-    	//TODO:: анализ пакетов. ищём пакет "веса", его меняем инкриментом, остальные персылаем как есть
-
-
-      CanTxEnqueue(rxHeader.Identifier, data, dst_bus_mask);
+      uint8_t tx_data[8];
+      memcpy(tx_data, data, sizeof(tx_data));
+      if (tx_data[0] == ServiceCmd_PositionDevice && tx_data[1] < 0xFFu) {
+        tx_data[1]++;
+      }
+      CanTxEnqueue(rxHeader.Identifier, tx_data, dst_bus_mask);
     }
     App_CanRxPush(rxHeader.Identifier, data, src_bus);
   }
@@ -229,13 +301,13 @@ void HAL_FDCAN_ErrorStatusCallback(FDCAN_HandleTypeDef *hfdcan, uint32_t ErrorSt
     FDCAN_ProtocolStatusTypeDef protocolStatus = {};
     HAL_FDCAN_GetProtocolStatus(hfdcan, &protocolStatus);
     if (protocolStatus.BusOff) {
-      uint16_t try_cnt = 0xFFFF;
-
-      SET_BIT(hfdcan->Instance->CCCR, FDCAN_CCCR_INIT);
-      while (((hfdcan->Instance->CCCR & FDCAN_CCCR_INIT) == 0U) && (try_cnt--)) {}
-
-      CLEAR_BIT(hfdcan->Instance->CCCR, FDCAN_CCCR_INIT);
-      while (((hfdcan->Instance->CCCR & FDCAN_CCCR_INIT) != 0U) && (try_cnt--)) {}
+      if (hfdcan == &hfdcan1) {
+        App_CanRecoverBus(hfdcan, 0u);
+        can1_tx_stall_since_ms = 0u;
+      } else if (hfdcan == &hfdcan2) {
+        App_CanRecoverBus(hfdcan, 1u);
+        can2_tx_stall_since_ms = 0u;
+      }
     }
   }
 }
@@ -257,6 +329,7 @@ void App_UpdateCanActivity(void)
     }
 
     App_UpdateCanLineState();
+    App_CanWatchdog();
 }
 
 void App_CanOnRx(uint8_t bus)
