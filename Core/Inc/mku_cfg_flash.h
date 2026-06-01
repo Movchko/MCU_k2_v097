@@ -18,6 +18,8 @@ extern uint8_t _mku_cfg_end[];
 #define FLASH_CFG_SIZE       ((uint32_t)(_mku_cfg_end - _mku_cfg_start))
 #define FLASH_CFG_SIZE_BYTES 0x2000u
 
+bool FlashReadConfig(MKUCfg *out);
+
 #ifdef __cplusplus
 }
 #endif
