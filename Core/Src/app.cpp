@@ -321,7 +321,7 @@ void App_Timer1ms(void) {
         {
             const uint32_t VREF_MV = 3300u;
             const uint32_t ADC_MAX = 4095u;
-            const uint32_t DIV_K   = 11u;
+            const uint32_t DIV_K   = 10;
 
             uint32_t raw_u24 = ADC_GetU24Filtered();
             uint32_t v_adc_mv = (raw_u24 * VREF_MV) / ADC_MAX;
