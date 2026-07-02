@@ -17,7 +17,7 @@
 #define FLASH_BANK_SIZE_BYTES    0x00040000u
 #define FLASH_SECTOR_SIZE_BYTES  0x2000u
 
-#define APP_VERSION_U32 16u
+#define APP_VERSION_U32 19u
 
 static uint8_t  g_upd_started = 0u;
 static uint8_t  g_upd_flash_error = 0u;
@@ -177,7 +177,10 @@ uint8_t FinishUpdateTransmit(void)
     return 1u;
 }
 
-uint32_t GetAppVersion(void)
+const char *GetAppVersion(void)
 {
-    return APP_VERSION_U32;
+    static char ver_buf[48];
+    /* fw: версия прошивки (APP_VERSION_U32) */
+    (void)snprintf(ver_buf, sizeof(ver_buf), "fw=%u", (unsigned)APP_VERSION_U32);
+    return ver_buf;
 }
