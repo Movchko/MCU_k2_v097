@@ -17,6 +17,12 @@ extern "C" {
 #include "main.h"
 #include "mku_cfg_flash.h"
 
+extern "C" {
+extern TIM_HandleTypeDef htim2;
+extern TIM_HandleTypeDef htim3;
+extern TIM_HandleTypeDef htim4;
+}
+
 extern DTS_HandleTypeDef hdts;
 
 /* Конфиг MKUCfg */
@@ -39,6 +45,84 @@ static VDeviceIgniter g_igniter3(3);
 /* Планировщик запуска спичек по старту тушения */
 static uint32_t g_extinguish_deadline_ms[NUM_DEV_IN_MCU];
 static uint8_t  g_extinguish_armed[NUM_DEV_IN_MCU];
+
+static uint32_t ResetDelayms = 3000;
+static uint8_t isReset = 0;
+
+/* Слоты 0..2: спички. VDtype[slot]==0 — канал отключён. */
+static uint8_t App_IsSlotEnabled(uint8_t slot)
+{
+	if (slot >= NUM_DEV_IN_MCU) {
+		return 0u;
+	}
+	return (g_cfg.VDtype[slot] != 0u) ? 1u : 0u;
+}
+
+static uint8_t App_IsIgniterSlotEnabled(uint8_t slot)
+{
+	if (slot >= NUM_DEV_IN_MCU) {
+		return 0u;
+	}
+	return (g_cfg.VDtype[slot] == DEVICE_IGNITER_TYPE) ? 1u : 0u;
+}
+
+static void App_RebuildBoardDevicesList(void)
+{
+	extern Device BoardDevicesList[];
+	extern uint8_t nDevs;
+
+	BoardDevicesList[0].zone   = g_cfg.UId.devId.zone;
+	BoardDevicesList[0].h_adr  = g_cfg.UId.devId.h_adr;
+	BoardDevicesList[0].l_adr  = g_cfg.UId.devId.l_adr;
+	BoardDevicesList[0].d_type = DEVICE_MCU_K2;
+
+	BoardDevicesList[1].zone   = g_cfg.UId.devId.zone;
+	BoardDevicesList[1].h_adr  = g_cfg.UId.devId.h_adr;
+	BoardDevicesList[1].l_adr  = 1;
+	BoardDevicesList[1].d_type = App_IsIgniterSlotEnabled(0) ? DEVICE_IGNITER_TYPE : 0u;
+
+	BoardDevicesList[2].zone   = g_cfg.UId.devId.zone;
+	BoardDevicesList[2].h_adr  = g_cfg.UId.devId.h_adr;
+	BoardDevicesList[2].l_adr  = 2;
+	BoardDevicesList[2].d_type = App_IsIgniterSlotEnabled(1) ? DEVICE_IGNITER_TYPE : 0u;
+
+	BoardDevicesList[3].zone   = g_cfg.UId.devId.zone;
+	BoardDevicesList[3].h_adr  = g_cfg.UId.devId.h_adr;
+	BoardDevicesList[3].l_adr  = 3;
+	BoardDevicesList[3].d_type = App_IsIgniterSlotEnabled(2) ? DEVICE_IGNITER_TYPE : 0u;
+
+	nDevs = 4;
+}
+
+static uint8_t App_IsBoardDevActive(uint8_t dnum)
+{
+	if (dnum == 1u) {
+		return App_IsIgniterSlotEnabled(0);
+	}
+	if (dnum == 2u) {
+		return App_IsIgniterSlotEnabled(1);
+	}
+	if (dnum == 3u) {
+		return App_IsIgniterSlotEnabled(2);
+	}
+	return 1u;
+}
+
+static void App_StopDisabledChannels(void)
+{
+	if (!App_IsIgniterSlotEnabled(0)) {
+		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_4);
+		g_extinguish_armed[0] = 0u;
+	}
+	if (!App_IsIgniterSlotEnabled(1)) {
+		HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_2);
+		g_extinguish_armed[1] = 0u;
+	}
+	if (!App_IsIgniterSlotEnabled(2)) {
+		HAL_TIM_PWM_Stop(&htim4, TIM_CHANNEL_4);
+		g_extinguish_armed[2] = 0u;
+	}
+}
 
 /* -------- Service callbacks for backend fire -------- */
 void RcvSetSystemTime(uint8_t *data) { (void)data; }
@@ -181,6 +265,9 @@ extern "C" void RcvStopExtinguishment(uint32_t MsgID, uint8_t *MsgData, uint8_t 
 
 /* callback статуса: отправляем его через CAN по протоколу backend */
 static void VDeviceSetStatus(uint8_t DNum, uint8_t Code, const uint8_t *Parameters) {
+    if (!App_IsBoardDevActive(DNum)) {
+        return;
+    }
     uint8_t data[7] = {0};
     for (uint8_t i = 0; i < 7; i++) {
         data[i] = Parameters[i];
@@ -190,11 +277,7 @@ static void VDeviceSetStatus(uint8_t DNum, uint8_t Code, const uint8_t *Paramete
 
 void SetHAdr(uint8_t h_adr) {
     g_cfg.UId.devId.h_adr = h_adr;
-    extern uint8_t nDevs;
-    extern Device BoardDevicesList[];
-    for (uint8_t i = 0; i < nDevs; i++) {
-        BoardDevicesList[i].h_adr = g_cfg.UId.devId.h_adr;
-    }
+    App_RebuildBoardDevicesList();
     SaveConfig();
 }
 
@@ -267,7 +350,7 @@ void DefaultConfig(void) {
 }
 
 void ResetMCU(void) {
-    NVIC_SystemReset();
+    isReset = 1;
 }
 
 uint32_t GetID(void) {
@@ -290,17 +373,29 @@ void CommandCB(uint8_t Dev, uint8_t Command, uint8_t *Parameters) {
         MCU_K2CommandCB(Command, Parameters);
         break;
     case 1:
-        g_igniter1.CommandCB(Command, Parameters);
+        if (App_IsIgniterSlotEnabled(0)) {
+            g_igniter1.CommandCB(Command, Parameters);
+        }
         break;
     case 2:
-        g_igniter2.CommandCB(Command, Parameters);
+        if (App_IsIgniterSlotEnabled(1)) {
+            g_igniter2.CommandCB(Command, Parameters);
+        }
         break;
     case 3:
-        g_igniter3.CommandCB(Command, Parameters);
+        if (App_IsIgniterSlotEnabled(2)) {
+            g_igniter3.CommandCB(Command, Parameters);
+        }
         break;
     default:
         break;
     }
+}
+
+void AplyConfig(void)
+{
+    App_RebuildBoardDevicesList();
+    App_StopDisabledChannels();
 }
 
 void ListenerCommandCB(uint32_t MsgID, uint8_t *MsgData) {
@@ -309,14 +404,7 @@ void ListenerCommandCB(uint32_t MsgID, uint8_t *MsgData) {
 }
 
 /* Timer tick (1ms) */
-extern TIM_HandleTypeDef htim2;
-extern TIM_HandleTypeDef htim3;
-extern TIM_HandleTypeDef htim4;
-
 void App_Init(void) {
-    extern Device BoardDevicesList[];
-    extern uint8_t nDevs;
-
     if (!FlashReadConfig(&g_cfg)) {
         DefaultConfig();
         SaveConfig();
@@ -342,34 +430,7 @@ void App_Init(void) {
     g_igniter3.VDeviceSaveCfg   = SaveConfig;
     g_igniter3.Init();
 
-    /* BoardDevicesList: physical + 3 virtual devices */
-    nDevs = 1;
-    BoardDevicesList[0].zone  = g_cfg.UId.devId.zone;
-    BoardDevicesList[0].h_adr = g_cfg.UId.devId.h_adr;
-    BoardDevicesList[0].l_adr = g_cfg.UId.devId.l_adr;
-    BoardDevicesList[0].d_type = DEVICE_MCU_K2;
-
-    if (nDevs < MAX_DEVS) {
-        BoardDevicesList[nDevs].zone  = g_cfg.UId.devId.zone;
-        BoardDevicesList[nDevs].h_adr = g_cfg.UId.devId.h_adr;
-        BoardDevicesList[nDevs].l_adr = 1; /* spichka1 */
-        BoardDevicesList[nDevs].d_type = DEVICE_IGNITER_TYPE;
-        nDevs++;
-    }
-    if (nDevs < MAX_DEVS) {
-        BoardDevicesList[nDevs].zone  = g_cfg.UId.devId.zone;
-        BoardDevicesList[nDevs].h_adr = g_cfg.UId.devId.h_adr;
-        BoardDevicesList[nDevs].l_adr = 2; /* spichka2 */
-        BoardDevicesList[nDevs].d_type = DEVICE_IGNITER_TYPE;
-        nDevs++;
-    }
-    if (nDevs < MAX_DEVS) {
-        BoardDevicesList[nDevs].zone  = g_cfg.UId.devId.zone;
-        BoardDevicesList[nDevs].h_adr = g_cfg.UId.devId.h_adr;
-        BoardDevicesList[nDevs].l_adr = 3; /* spichka3 */
-        BoardDevicesList[nDevs].d_type = DEVICE_IGNITER_TYPE;
-        nDevs++;
-    }
+    App_RebuildBoardDevicesList();
 
     extern bool isListener;
     isListener = true;
@@ -433,18 +494,26 @@ void App_Timer1ms(void) {
     /* Апдейты активности CAN */
     App_UpdateCanActivity();
 
+    // задержка софт-рестарта. нужно чтобы усройство успело широковещательную переслать команду дальше
+    if (isReset) {
+        ResetDelayms--;
+        if (ResetDelayms == 0u) {
+            NVIC_SystemReset();
+        }
+    }
+
     /* Обновление ADC-состояния линии, только когда ШИМ выключен */
-    if (!g_igniter1.IsPwmActive()) {
+    if (App_IsIgniterSlotEnabled(0) && !g_igniter1.IsPwmActive()) {
         uint16_t raw = ADC_GetIgniter1Filtered();
         uint16_t mv = (uint16_t)((uint32_t)raw * 3300u / 4095u);
         g_igniter1.UpdateLineFromAdcMv(mv);
     }
-    if (!g_igniter2.IsPwmActive()) {
+    if (App_IsIgniterSlotEnabled(1) && !g_igniter2.IsPwmActive()) {
         uint16_t raw = ADC_GetIgniter2Filtered();
         uint16_t mv = (uint16_t)((uint32_t)raw * 3300u / 4095u);
         g_igniter2.UpdateLineFromAdcMv(mv);
     }
-    if (!g_igniter3.IsPwmActive()) {
+    if (App_IsIgniterSlotEnabled(2) && !g_igniter3.IsPwmActive()) {
         uint16_t raw = ADC_GetIgniter3Filtered();
         uint16_t mv = (uint16_t)((uint32_t)raw * 3300u / 4095u);
         g_igniter3.UpdateLineFromAdcMv(mv);
@@ -459,35 +528,48 @@ void App_Timer1ms(void) {
                                       nullptr, App_IsIgniterSlot, App_IsIgniterBurnRunning,
                                       App_FireIgniterSlot, nullptr);
 
-    g_igniter1.Timer1ms();
-    g_igniter2.Timer1ms();
-    g_igniter3.Timer1ms();
+    if (App_IsIgniterSlotEnabled(0)) {
+        g_igniter1.Timer1ms();
+    }
+    if (App_IsIgniterSlotEnabled(1)) {
+        g_igniter2.Timer1ms();
+    }
+    if (App_IsIgniterSlotEnabled(2)) {
+        g_igniter3.Timer1ms();
+    }
 
-    /* Применяем ШИМ на соответствующие каналы:
-     *  TIM3 CH4 -> igniter1 (спичка1)
-     *  TIM2 CH2 -> igniter2 (спичка2)
-     *  TIM4 CH4 -> igniter3 (спичка3)
-     */
-    uint16_t pwm1 = g_igniter1.GetPwm();
-    if (pwm1 > 0u) {
-        HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, pwm1);
+    if (App_IsIgniterSlotEnabled(0)) {
+        uint16_t pwm1 = g_igniter1.GetPwm();
+        if (pwm1 > 0u) {
+            HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
+            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, pwm1);
+        } else {
+            HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_4);
+        }
     } else {
         HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_4);
     }
 
-    uint16_t pwm2 = g_igniter2.GetPwm();
-    if (pwm2 > 0u) {
-        HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
-        __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm2);
+    if (App_IsIgniterSlotEnabled(1)) {
+        uint16_t pwm2 = g_igniter2.GetPwm();
+        if (pwm2 > 0u) {
+            HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
+            __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm2);
+        } else {
+            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_2);
+        }
     } else {
         HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_2);
     }
 
-    uint16_t pwm3 = g_igniter3.GetPwm();
-    if (pwm3 > 0u) {
-        HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
-        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_4, pwm3);
+    if (App_IsIgniterSlotEnabled(2)) {
+        uint16_t pwm3 = g_igniter3.GetPwm();
+        if (pwm3 > 0u) {
+            HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
+            __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_4, pwm3);
+        } else {
+            HAL_TIM_PWM_Stop(&htim4, TIM_CHANNEL_4);
+        }
     } else {
         HAL_TIM_PWM_Stop(&htim4, TIM_CHANNEL_4);
     }

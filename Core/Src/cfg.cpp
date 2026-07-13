@@ -16,6 +16,8 @@ extern "C" {
 extern MKUCfg g_cfg;
 extern MKUCfg g_saved_cfg;
 
+extern "C" void AplyConfig(void);
+
 bool FlashReadConfig(MKUCfg *out)
 {
     if (out == nullptr) {
@@ -88,6 +90,7 @@ void SaveConfig(void)
     (void)size;
     FlashWriteData(reinterpret_cast<uint8_t *>(&g_cfg), size);
     g_saved_cfg = g_cfg;
+    AplyConfig();
 }
 
 uint32_t GetConfigSize(void)
@@ -123,4 +126,5 @@ void SetConfigWord(uint16_t num, uint32_t word)
     p[byte_index + 1] = static_cast<uint8_t>((word >> 16) & 0xFFu);
     p[byte_index + 2] = static_cast<uint8_t>((word >> 8)  & 0xFFu);
     p[byte_index + 3] = static_cast<uint8_t>((word >> 0)  & 0xFFu);
+    AplyConfig();
 }
