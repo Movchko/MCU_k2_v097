@@ -2,6 +2,7 @@
 
 extern "C" {
 #include "backend.h"
+#include "tick_time.h"
 }
 
 #include "main.h"
@@ -20,8 +21,8 @@ static volatile uint8_t can_rx_tail = 0;
 
 volatile uint8_t CAN1_Active = 0;
 volatile uint8_t CAN2_Active = 0;
-static uint32_t can1_last_rx_tick = 0;
-static uint32_t can2_last_rx_tick = 0;
+static volatile uint32_t can1_last_rx_tick = 0;
+static volatile uint32_t can2_last_rx_tick = 0;
 static uint32_t can_state_last_update_ms = 0;
 
 typedef enum CANState {
@@ -195,7 +196,7 @@ static uint8_t DecodeCanStateFromLec(uint32_t lec)
 static void App_UpdateCanLineState(void)
 {
   uint32_t now = HAL_GetTick();
-  if ((now - can_state_last_update_ms) < 1000u) {
+  if (!TickAgeExpiredMs(now, can_state_last_update_ms, 1000u)) {
     return;
   }
   can_state_last_update_ms = now;
@@ -224,7 +225,7 @@ static void App_CanRecoverBus(FDCAN_HandleTypeDef *hfdcan, uint8_t bus_idx)
 static void App_CanWatchdog(void)
 {
   uint32_t now = HAL_GetTick();
-  if ((now - can_watchdog_last_ms) < CAN_WATCHDOG_PERIOD_MS) {
+  if (!TickAgeExpiredMs(now, can_watchdog_last_ms, CAN_WATCHDOG_PERIOD_MS)) {
     return;
   }
   can_watchdog_last_ms = now;
@@ -240,13 +241,13 @@ static void App_CanWatchdog(void)
   }
 
   if (can1_tx_head != can1_tx_tail && can1_tx_stall_since_ms != 0u &&
-      (now - can1_tx_stall_since_ms) >= CAN_TX_STALL_RECOVERY_MS) {
+      TickAgeExpiredMs(now, can1_tx_stall_since_ms, CAN_TX_STALL_RECOVERY_MS) != 0u) {
     App_CanRecoverBus(&hfdcan1, 0u);
     g_can_tx_stall_recover_count[0]++;
     can1_tx_stall_since_ms = 0u;
   }
   if (can2_tx_head != can2_tx_tail && can2_tx_stall_since_ms != 0u &&
-      (now - can2_tx_stall_since_ms) >= CAN_TX_STALL_RECOVERY_MS) {
+      TickAgeExpiredMs(now, can2_tx_stall_since_ms, CAN_TX_STALL_RECOVERY_MS) != 0u) {
     App_CanRecoverBus(&hfdcan2, 1u);
     g_can_tx_stall_recover_count[1]++;
     can2_tx_stall_since_ms = 0u;
@@ -315,14 +316,16 @@ void HAL_FDCAN_ErrorStatusCallback(FDCAN_HandleTypeDef *hfdcan, uint32_t ErrorSt
 void App_UpdateCanActivity(void)
 {
     uint32_t now = HAL_GetTick();
-    if (can1_last_rx_tick != 0u) {
-        if ((now - can1_last_rx_tick) >= 3000u) {
+    uint32_t last1 = can1_last_rx_tick;
+    uint32_t last2 = can2_last_rx_tick;
+    if (last1 != 0u) {
+        if (TickAgeExpiredMs(now, last1, 3000u) != 0u) {
             CAN1_Active = 0u;
             can1_last_rx_tick = 0u;
         }
     }
-    if (can2_last_rx_tick != 0u) {
-        if ((now - can2_last_rx_tick) >= 3000u) {
+    if (last2 != 0u) {
+        if (TickAgeExpiredMs(now, last2, 3000u) != 0u) {
             CAN2_Active = 0u;
             can2_last_rx_tick = 0u;
         }
