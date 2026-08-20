@@ -88,9 +88,10 @@ void SaveConfig(void)
 {
     uint32_t size = GetConfigSize();
     (void)size;
+    /* Только flash. AplyConfig (смена zone в BoardDevicesList) — после ACK
+     * в backend SaveConfig, иначе ППКУ теряет ответы при APPLY со сменой зоны. */
     FlashWriteData(reinterpret_cast<uint8_t *>(&g_cfg), size);
     g_saved_cfg = g_cfg;
-    AplyConfig();
 }
 
 uint32_t GetConfigSize(void)
@@ -126,5 +127,6 @@ void SetConfigWord(uint16_t num, uint32_t word)
     p[byte_index + 1] = static_cast<uint8_t>((word >> 16) & 0xFFu);
     p[byte_index + 2] = static_cast<uint8_t>((word >> 8)  & 0xFFu);
     p[byte_index + 3] = static_cast<uint8_t>((word >> 0)  & 0xFFu);
-    AplyConfig();
+    /* Не вызывать AplyConfig здесь: при пословной заливке APPLY смена zone
+     * в BoardDevicesList рвёт сессию (ACK уходят с новым zone, ППКУ ждёт старый). */
 }

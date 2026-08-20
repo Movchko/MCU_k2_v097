@@ -364,6 +364,7 @@ void MCU_K2CommandCB(uint8_t Command, uint8_t *Parameters) {
     if (Command == 20) {
         g_cfg.UId.devId.zone = Parameters[0];
         SaveConfig();
+        AplyConfig();
     }
 }
 
@@ -398,6 +399,12 @@ void AplyConfig(void)
     App_StopDisabledChannels();
 }
 
+static void App_SaveConfigAndApply(void)
+{
+    SaveConfig();
+    AplyConfig();
+}
+
 void ListenerCommandCB(uint32_t MsgID, uint8_t *MsgData) {
     (void)MsgID;
     (void)MsgData;
@@ -417,17 +424,17 @@ void App_Init(void) {
     /* Init virtual igniters from config slots */
     g_igniter1.DeviceInit(&g_cfg.Devices[0]);
     g_igniter1.VDeviceSetStatus = VDeviceSetStatus;
-    g_igniter1.VDeviceSaveCfg   = SaveConfig;
+    g_igniter1.VDeviceSaveCfg   = App_SaveConfigAndApply;
     g_igniter1.Init();
 
     g_igniter2.DeviceInit(&g_cfg.Devices[1]);
     g_igniter2.VDeviceSetStatus = VDeviceSetStatus;
-    g_igniter2.VDeviceSaveCfg   = SaveConfig;
+    g_igniter2.VDeviceSaveCfg   = App_SaveConfigAndApply;
     g_igniter2.Init();
 
     g_igniter3.DeviceInit(&g_cfg.Devices[2]);
     g_igniter3.VDeviceSetStatus = VDeviceSetStatus;
-    g_igniter3.VDeviceSaveCfg   = SaveConfig;
+    g_igniter3.VDeviceSaveCfg   = App_SaveConfigAndApply;
     g_igniter3.Init();
 
     App_RebuildBoardDevicesList();
