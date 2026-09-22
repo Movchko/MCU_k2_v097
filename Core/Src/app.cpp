@@ -45,6 +45,8 @@ static VDeviceIgniter g_igniter3(3);
 /* Планировщик запуска спичек по старту тушения */
 static uint32_t g_extinguish_deadline_ms[NUM_DEV_IN_MCU];
 static uint8_t  g_extinguish_armed[NUM_DEV_IN_MCU];
+static uint8_t  g_extinguish_paused[NUM_DEV_IN_MCU];
+static uint32_t g_extinguish_remaining_ms[NUM_DEV_IN_MCU];
 
 static uint32_t ResetDelayms = 3000;
 static uint8_t isReset = 0;
@@ -113,14 +115,20 @@ static void App_StopDisabledChannels(void)
 	if (!App_IsIgniterSlotEnabled(0)) {
 		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_4);
 		g_extinguish_armed[0] = 0u;
+		g_extinguish_paused[0] = 0u;
+		g_extinguish_remaining_ms[0] = 0u;
 	}
 	if (!App_IsIgniterSlotEnabled(1)) {
 		HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_2);
 		g_extinguish_armed[1] = 0u;
+		g_extinguish_paused[1] = 0u;
+		g_extinguish_remaining_ms[1] = 0u;
 	}
 	if (!App_IsIgniterSlotEnabled(2)) {
 		HAL_TIM_PWM_Stop(&htim4, TIM_CHANNEL_4);
 		g_extinguish_armed[2] = 0u;
+		g_extinguish_paused[2] = 0u;
+		g_extinguish_remaining_ms[2] = 0u;
 	}
 }
 
@@ -160,6 +168,8 @@ static void App_ArmIgniterSlot(uint8_t ign_slot, uint8_t zd, uint8_t md)
 
     g_extinguish_deadline_ms[ign_slot] = HAL_GetTick() + delay_ms;
     g_extinguish_armed[ign_slot] = 1u;
+    g_extinguish_paused[ign_slot] = 0u;
+    g_extinguish_remaining_ms[ign_slot] = delay_ms;
     SetReplyStartExtinguishment((uint8_t)(ign_slot + 1u));
 }
 
@@ -237,6 +247,8 @@ static void App_FireIgniterSlot(uint8_t slot, void *ctx)
 {
     (void)ctx;
     g_extinguish_armed[slot] = 0u;
+    g_extinguish_paused[slot] = 0u;
+    g_extinguish_remaining_ms[slot] = 0u;
     uint8_t params[7] = {0, 0, 0, 0, 0, 0, 0};
     if (slot == 0u) {
         g_igniter1.CommandCB(10, params);
@@ -260,7 +272,57 @@ extern "C" void RcvStopExtinguishment(uint32_t MsgID, uint8_t *MsgData, uint8_t 
     }
 
     g_extinguish_armed[(uint8_t)ign_slot] = 0u;
+    g_extinguish_paused[(uint8_t)ign_slot] = 0u;
+    g_extinguish_remaining_ms[(uint8_t)ign_slot] = 0u;
     SetReplyStopExtinguishment((uint8_t)(ign_slot + 1)); /* slot0->dev1, slot1->dev2, slot2->dev3 */
+}
+
+extern "C" void RcvPauseExtinguishmentTimer(uint32_t MsgID, uint8_t *MsgData, uint8_t is_mine)
+{
+	(void)MsgData;
+	if (is_mine == 0u) {
+		return;
+	}
+
+	int8_t ign_slot = App_FindIgniterSlotByMsgId(MsgID);
+	if (ign_slot < 0) {
+		return;
+	}
+
+	uint8_t slot = (uint8_t)ign_slot;
+	/* ACK всегда: иначе ППКУ ретраит Pause ~10 с и может догнать уже armed-канал. */
+	if (g_extinguish_armed[slot] && !g_extinguish_paused[slot]) {
+		uint32_t now = HAL_GetTick();
+		if ((int32_t)(g_extinguish_deadline_ms[slot] - now) > 0) {
+			g_extinguish_remaining_ms[slot] = g_extinguish_deadline_ms[slot] - now;
+			g_extinguish_paused[slot] = 1u;
+		}
+		/* Дедлайн уже прошёл: канал ждёт освобождения соседа — паузу не ставим. */
+	}
+
+	SetReplyPauseExtinguishmentTimer((uint8_t)(slot + 1));
+}
+
+extern "C" void RcvResumeExtinguishmentTimer(uint32_t MsgID, uint8_t *MsgData, uint8_t is_mine)
+{
+	(void)MsgData;
+	if (is_mine == 0u) {
+		return;
+	}
+
+	int8_t ign_slot = App_FindIgniterSlotByMsgId(MsgID);
+	if (ign_slot < 0) {
+		return;
+	}
+
+	uint8_t slot = (uint8_t)ign_slot;
+	if (g_extinguish_armed[slot] && g_extinguish_paused[slot]) {
+		uint32_t now = HAL_GetTick();
+		g_extinguish_deadline_ms[slot] = now + g_extinguish_remaining_ms[slot];
+		g_extinguish_paused[slot] = 0u;
+	}
+
+	SetReplyResumeExtinguishmentTimer((uint8_t)(slot + 1));
 }
 
 /* callback статуса: отправляем его через CAN по протоколу backend */
@@ -532,7 +594,7 @@ void App_Timer1ms(void) {
 
     /* Планировщик: одна спичка за раз, следующая — после завершения цикла предыдущей */
     AppIgniter_RunSequentialScheduler(NUM_DEV_IN_MCU, now, g_extinguish_deadline_ms, g_extinguish_armed,
-                                      nullptr, App_IsIgniterSlot, App_IsIgniterBurnRunning,
+                                      g_extinguish_paused, App_IsIgniterSlot, App_IsIgniterBurnRunning,
                                       App_FireIgniterSlot, nullptr);
 
     if (App_IsIgniterSlotEnabled(0)) {
