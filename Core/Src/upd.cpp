@@ -17,7 +17,7 @@
 #define FLASH_BANK_SIZE_BYTES    0x00040000u
 #define FLASH_SECTOR_SIZE_BYTES  0x2000u
 
-#define APP_VERSION_U32 2u
+#define APP_VERSION_U32 3u
 
 static uint8_t  g_upd_started = 0u;
 static uint8_t  g_upd_flash_error = 0u;

@@ -84,6 +84,33 @@ void FlashWriteData(uint8_t *ConfigPtr, uint32_t ConfigSize)
     HAL_FLASH_Lock();
 }
 
+bool FlashEraseConfig(void)
+{
+    FLASH_EraseInitTypeDef erase;
+    uint32_t sector_err = 0u;
+#if defined(FLASH_TYPEERASE_SECTORS_NS)
+    erase.TypeErase = FLASH_TYPEERASE_SECTORS_NS;
+#else
+    erase.TypeErase = FLASH_TYPEERASE_SECTORS;
+#endif
+    erase.Banks = FLASH_BANK_2;
+    erase.Sector = FLASH_CFG_SECTOR;
+    erase.NbSectors = 1;
+
+    HAL_StatusTypeDef st = HAL_FLASH_Unlock();
+    if (st != HAL_OK) {
+        return false;
+    }
+    st = HAL_FLASHEx_Erase(&erase, &sector_err);
+    HAL_FLASH_Lock();
+    return st == HAL_OK;
+}
+
+extern "C" uint8_t FactoryResetConfig(void)
+{
+    return FlashEraseConfig() ? 1u : 0u;
+}
+
 void SaveConfig(void)
 {
     uint32_t size = GetConfigSize();
