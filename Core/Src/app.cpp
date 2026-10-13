@@ -399,16 +399,22 @@ void DefaultConfig(void) {
     ign_cfg1->threshold_break_low  = 100;
     ign_cfg1->threshold_break_high = 1000;
     ign_cfg1->burn_retry_count     = 0u;
+    ign_cfg1->burn_ramp_ms         = 10u;
+    ign_cfg1->burn_hold_ms         = 20u;
 
     ign_cfg2->disable_sc_check     = 0u;
     ign_cfg2->threshold_break_low  = 100;
     ign_cfg2->threshold_break_high = 1000;
     ign_cfg2->burn_retry_count     = 0u;
+    ign_cfg2->burn_ramp_ms         = 10u;
+    ign_cfg2->burn_hold_ms         = 20u;
 
     ign_cfg3->disable_sc_check     = 0u;
     ign_cfg3->threshold_break_low  = 100;
     ign_cfg3->threshold_break_high = 1000;
     ign_cfg3->burn_retry_count     = 0u;
+    ign_cfg3->burn_ramp_ms         = 10u;
+    ign_cfg3->burn_hold_ms         = 20u;
 }
 
 void ResetMCU(void) {
