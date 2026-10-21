@@ -396,22 +396,22 @@ void DefaultConfig(void) {
     memset(ign_cfg3, 0, sizeof(DeviceIgniterConfig));
 
     ign_cfg1->disable_sc_check     = 0u;
-    ign_cfg1->threshold_break_low  = 100;
-    ign_cfg1->threshold_break_high = 1000;
+    ign_cfg1->threshold_break_low  = 1000;
+    ign_cfg1->threshold_break_high = 6200;
     ign_cfg1->burn_retry_count     = 0u;
     ign_cfg1->burn_ramp_ms         = 10u;
     ign_cfg1->burn_hold_ms         = 20u;
 
     ign_cfg2->disable_sc_check     = 0u;
-    ign_cfg2->threshold_break_low  = 100;
-    ign_cfg2->threshold_break_high = 1000;
+    ign_cfg2->threshold_break_low  = 1000;
+    ign_cfg2->threshold_break_high = 6200;
     ign_cfg2->burn_retry_count     = 0u;
     ign_cfg2->burn_ramp_ms         = 10u;
     ign_cfg2->burn_hold_ms         = 20u;
 
     ign_cfg3->disable_sc_check     = 0u;
-    ign_cfg3->threshold_break_low  = 100;
-    ign_cfg3->threshold_break_high = 1000;
+    ign_cfg3->threshold_break_low  = 1000;
+    ign_cfg3->threshold_break_high = 6200;
     ign_cfg3->burn_retry_count     = 0u;
     ign_cfg3->burn_ramp_ms         = 10u;
     ign_cfg3->burn_hold_ms         = 20u;
@@ -511,6 +511,22 @@ void App_Init(void) {
     isListener = true;
 }
 
+/* Ом = (6743 * код_канала - 1060625) / 1000.
+ * Минимакс по точкам 875->5к, 759->4к, 626->3к, 469->2к, 282->1к.
+ * На этих точках ошибка не больше 160 Ом. */
+static uint16_t IgniterChannelToOhm(uint16_t channel)
+{
+    int32_t num = (int32_t)channel * 6743 - 1060625;
+    if (num < 0) {
+        return 0u;
+    }
+    num = (num + 500) / 1000;
+    if (num > 65535) {
+        num = 65535;
+    }
+    return (uint16_t)num;
+}
+
 void App_Timer1ms(void) {
     static uint16_t led_cnt = 0u;
     static uint16_t status_cnt = 0u;
@@ -580,18 +596,15 @@ void App_Timer1ms(void) {
     /* Обновление ADC-состояния линии, только когда ШИМ выключен */
     if (App_IsIgniterSlotEnabled(0) && !g_igniter1.IsPwmActive()) {
         uint16_t raw = ADC_GetIgniter1Filtered();
-        uint16_t mv = (uint16_t)((uint32_t)raw * 3300u / 4095u);
-        g_igniter1.UpdateLineFromAdcMv(mv);
+        g_igniter1.UpdateLineFromAdc(IgniterChannelToOhm(raw));
     }
     if (App_IsIgniterSlotEnabled(1) && !g_igniter2.IsPwmActive()) {
         uint16_t raw = ADC_GetIgniter2Filtered();
-        uint16_t mv = (uint16_t)((uint32_t)raw * 3300u / 4095u);
-        g_igniter2.UpdateLineFromAdcMv(mv);
+        g_igniter2.UpdateLineFromAdc(IgniterChannelToOhm(raw));
     }
     if (App_IsIgniterSlotEnabled(2) && !g_igniter3.IsPwmActive()) {
         uint16_t raw = ADC_GetIgniter3Filtered();
-        uint16_t mv = (uint16_t)((uint32_t)raw * 3300u / 4095u);
-        g_igniter3.UpdateLineFromAdcMv(mv);
+        g_igniter3.UpdateLineFromAdc(IgniterChannelToOhm(raw));
     }
 
 
