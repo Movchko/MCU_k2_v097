@@ -396,22 +396,22 @@ void DefaultConfig(void) {
     memset(ign_cfg3, 0, sizeof(DeviceIgniterConfig));
 
     ign_cfg1->disable_sc_check     = 0u;
-    ign_cfg1->threshold_break_low  = 1000;
-    ign_cfg1->threshold_break_high = 6200;
+    ign_cfg1->threshold_break_low  = IGNITER_TH_LOW_DEFAULT;
+    ign_cfg1->threshold_break_high = IGNITER_TH_HIGH_DEFAULT;
     ign_cfg1->burn_retry_count     = 0u;
     ign_cfg1->burn_ramp_ms         = 10u;
     ign_cfg1->burn_hold_ms         = 20u;
 
     ign_cfg2->disable_sc_check     = 0u;
-    ign_cfg2->threshold_break_low  = 1000;
-    ign_cfg2->threshold_break_high = 6200;
+    ign_cfg2->threshold_break_low  = IGNITER_TH_LOW_DEFAULT;
+    ign_cfg2->threshold_break_high = IGNITER_TH_HIGH_DEFAULT;
     ign_cfg2->burn_retry_count     = 0u;
     ign_cfg2->burn_ramp_ms         = 10u;
     ign_cfg2->burn_hold_ms         = 20u;
 
     ign_cfg3->disable_sc_check     = 0u;
-    ign_cfg3->threshold_break_low  = 1000;
-    ign_cfg3->threshold_break_high = 6200;
+    ign_cfg3->threshold_break_low  = IGNITER_TH_LOW_DEFAULT;
+    ign_cfg3->threshold_break_high = IGNITER_TH_HIGH_DEFAULT;
     ign_cfg3->burn_retry_count     = 0u;
     ign_cfg3->burn_ramp_ms         = 10u;
     ign_cfg3->burn_hold_ms         = 20u;
