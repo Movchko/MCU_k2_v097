@@ -362,9 +362,11 @@ void DefaultConfig(void) {
     g_cfg.UId.devId.zone  = 0;
     g_cfg.UId.devId.l_adr = 0;
 
-    uint8_t hadr = static_cast<uint8_t>(uid0 & 0xFFu);
+    /* S/N = UId0:UId1:UId2. На одной партии различны только байты UId0,
+     * шире всего [23:16]. Если он 0 — младший байт UId0, иначе 1. */
+    uint8_t hadr = static_cast<uint8_t>((uid0 >> 16) & 0xFFu);
     if (hadr == 0u) {
-        hadr = static_cast<uint8_t>(uid1 & 0xFFu);
+        hadr = static_cast<uint8_t>(uid0 & 0xFFu);
         if (hadr == 0u) {
             hadr = 1u;
         }
